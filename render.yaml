@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: finance-demo-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: SUPABASE_URL
+        value: https://fpuczozmwjwyajoznojp.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CLIENT_ORIGIN
+        value: https://mlggamingnird.github.io
