@@ -62,11 +62,17 @@ header {
 }
 
 .add-form {
-  flex-direction: row;
+  display: flex;
+  gap: 0.5rem;
 }
 
 .add-form input {
   flex: 1;
+  min-width: 0;
+}
+
+.add-form input[type='number'] {
+  flex: 0 1 8rem;
 }
 
 .transaction-list {
