@@ -6,6 +6,7 @@ import { TransactionList } from './components/TransactionList';
 import { MonthPicker } from './components/MonthPicker';
 import { SummaryCards } from './components/SummaryCards';
 import { BudgetList } from './components/BudgetList';
+import { SpendingChat } from './components/SpendingChat';
 import { currentMonth } from './lib/month';
 
 // Recharts is the biggest dependency, so it loads after the dashboard renders.
@@ -288,6 +289,8 @@ function Dashboard({ session }) {
         summary={summary}
         onSave={handleSaveBudgets}
       />
+
+      <SpendingChat token={token} />
 
       <section className="transactions">
         <div className="section-header">

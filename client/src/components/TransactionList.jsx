@@ -16,7 +16,13 @@ export function TransactionList({ transactions, categories, loading, emptyMessag
           <div className="details">
             <span className="description">{t.description}</span>
             <span className="meta">
-              {categoryNames.get(t.category_id) ?? 'Uncategorized'} · {formatDate(t.occurred_at)}
+              {categoryNames.get(t.category_id) ?? 'Uncategorized'}
+              {t.auto_categorized && (
+                <span className="auto-badge" title="Category picked automatically. Edit to change it.">
+                  auto
+                </span>
+              )}{' '}
+              · {formatDate(t.occurred_at)}
             </span>
           </div>
           <span className={`amount ${Number(t.amount) > 0 ? 'income' : 'expense'}`}>

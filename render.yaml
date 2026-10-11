@@ -13,3 +13,5 @@ services:
         sync: false
       - key: CLIENT_ORIGIN
         value: https://mlggamingnird.github.io
+      - key: GROQ_API_KEY
+        sync: false

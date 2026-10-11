@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { requireAuth } from '../lib/requireAuth.js';
-import { monthRange, monthSchema } from '../lib/month.js';
+import { monthRange, monthSchema, shiftMonth } from '../lib/month.js';
+import { fromCents, toCents } from '../lib/money.js';
 
 export const summaryRouter = Router();
 
@@ -10,11 +11,8 @@ summaryRouter.use(requireAuth);
 
 const querySchema = z.object({ month: monthSchema });
 
-const toCents = (amount) => Math.round(Number(amount) * 100);
-const fromCents = (cents) => cents / 100;
 
-// Totals for one month. Summed in integer cents so float error can't
-// creep into the displayed totals.
+// Totals for one month.
 summaryRouter.get('/', async (req, res) => {
   const query = querySchema.safeParse(req.query);
   if (!query.success) {
@@ -61,12 +59,6 @@ const trendQuerySchema = z.object({
   end: monthSchema,
   months: z.coerce.number().int().min(1).max(24).default(6),
 });
-
-function shiftMonth(month, delta) {
-  const [y, m] = month.split('-').map(Number);
-  const date = new Date(Date.UTC(y, m - 1 + delta, 1));
-  return date.toISOString().slice(0, 7);
-}
 
 // Income and spending per month for the `months` months ending at `end`.
 // Months with no activity are included as zeros so the chart has no gaps.

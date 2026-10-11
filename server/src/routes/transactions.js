@@ -4,12 +4,13 @@ import { supabase } from '../lib/supabase.js';
 import { requireAuth } from '../lib/requireAuth.js';
 import { PG_FOREIGN_KEY_VIOLATION, validateBody, validateIdParam } from '../lib/validate.js';
 import { monthRange, monthSchema } from '../lib/month.js';
+import { suggestCategory } from '../lib/categorize.js';
 
 export const transactionsRouter = Router();
 
 transactionsRouter.use(requireAuth);
 
-const COLUMNS = 'id, description, amount, category_id, occurred_at, created_at';
+const COLUMNS = 'id, description, amount, category_id, auto_categorized, occurred_at, created_at';
 
 // Negative amounts are expenses, positive are income.
 const amount = z
@@ -74,10 +75,18 @@ transactionsRouter.get('/', async (req, res) => {
   res.json(data);
 });
 
+// Leaving category_id out asks the server to pick one; sending null means
+// "uncategorized" on purpose.
 transactionsRouter.post('/', validateBody(createTransactionSchema), async (req, res) => {
+  const row = { ...req.body, user_id: req.user.id };
+  if (row.category_id === undefined) {
+    row.category_id = await suggestCategory(req.user.id, row);
+    row.auto_categorized = row.category_id !== null;
+  }
+
   const { data, error } = await supabase
     .from('transactions')
-    .insert({ ...req.body, user_id: req.user.id })
+    .insert(row)
     .select(COLUMNS)
     .single();
 
@@ -86,9 +95,12 @@ transactionsRouter.post('/', validateBody(createTransactionSchema), async (req, 
 });
 
 transactionsRouter.patch('/:id', validateIdParam, validateBody(updateTransactionSchema), async (req, res) => {
+  // A category the user chose themselves is no longer an automatic one.
+  const changes = 'category_id' in req.body ? { ...req.body, auto_categorized: false } : req.body;
+
   const { data, error } = await supabase
     .from('transactions')
-    .update(req.body)
+    .update(changes)
     .eq('id', req.params.id)
     .eq('user_id', req.user.id)
     .select(COLUMNS)

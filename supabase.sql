@@ -25,6 +25,7 @@ create table transactions (
   description text not null,
   amount numeric not null,
   category_id uuid,
+  auto_categorized boolean not null default false,
   occurred_at date not null default current_date,
   created_at timestamptz not null default now(),
   -- A transaction can only reference a category owned by the same user.

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { ApiError } from '../lib/api';
 import { todayISO } from '../lib/format';
 
+const AUTO = 'auto';
+
 function FieldError({ errors }) {
   return errors?.length ? <span className="field-error">{errors[0]}</span> : null;
 }
@@ -13,7 +15,8 @@ export function TransactionForm({ categories, transaction, onSubmit, onCancel })
   const [type, setType] = useState(transaction && Number(transaction.amount) > 0 ? 'income' : 'expense');
   const [description, setDescription] = useState(transaction?.description ?? '');
   const [amount, setAmount] = useState(transaction ? String(Math.abs(Number(transaction.amount))) : '');
-  const [categoryId, setCategoryId] = useState(transaction?.category_id ?? '');
+  // New transactions default to letting the server pick a category.
+  const [categoryId, setCategoryId] = useState(transaction ? (transaction.category_id ?? '') : AUTO);
   const [date, setDate] = useState(transaction?.occurred_at ?? todayISO());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -24,7 +27,7 @@ export function TransactionForm({ categories, transaction, onSubmit, onCancel })
   function changeType(next) {
     setType(next);
     // Drop a category that belongs to the other side.
-    if (!categories.some((c) => c.id === categoryId && c.kind === next)) setCategoryId('');
+    if (categoryId !== AUTO && !categories.some((c) => c.id === categoryId && c.kind === next)) setCategoryId('');
   }
 
   async function handleSubmit(e) {
@@ -38,12 +41,14 @@ export function TransactionForm({ categories, transaction, onSubmit, onCancel })
       await onSubmit({
         description,
         amount: type === 'expense' ? -magnitude : magnitude,
-        category_id: categoryId || null,
+        // Omitting category_id asks the server to auto-categorize.
+        ...(categoryId !== AUTO && { category_id: categoryId || null }),
         occurred_at: date,
       });
       if (!editing) {
         setDescription('');
         setAmount('');
+        setCategoryId(AUTO);
       }
     } catch (err) {
       setError(err.message);
@@ -105,6 +110,7 @@ export function TransactionForm({ categories, transaction, onSubmit, onCancel })
         <label className="grow">
           <span className="sr-only">Category</span>
           <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            {!editing && <option value={AUTO}>✨ Auto-categorize</option>}
             <option value="">No category</option>
             {categoryOptions.map((c) => (
               <option key={c.id} value={c.id}>
@@ -120,7 +126,7 @@ export function TransactionForm({ categories, transaction, onSubmit, onCancel })
           <FieldError errors={fieldErrors.occurred_at} />
         </label>
         <button type="submit" disabled={submitting}>
-          {editing ? 'Save' : 'Add'}
+          {submitting ? 'Saving…' : editing ? 'Save' : 'Add'}
         </button>
         {editing && (
           <button type="button" className="secondary" onClick={onCancel}>
