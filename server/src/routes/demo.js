@@ -78,7 +78,16 @@ function toISODate(date) {
   return date.toISOString().slice(0, 10);
 }
 
-// The current month and the two before it, up to today.
+// Six months of history up to today, so the trend chart is full.
+const SEED_MONTHS = 6;
+
+// The one-off list covers ~3 months; earlier cycles repeat it at slightly
+// different amounts so the months don't look identical.
+const ONE_OFF_CYCLES = [
+  { offsetDays: 0, scale: 1 },
+  { offsetDays: 91, scale: 0.9 },
+];
+
 function seedRows(userId, categoryIds) {
   const today = new Date();
   const rows = [];
@@ -91,14 +100,17 @@ function seedRows(userId, categoryIds) {
       occurred_at: toISODate(date),
     });
 
-  for (let back = 2; back >= 0; back--) {
+  for (let back = SEED_MONTHS - 1; back >= 0; back--) {
     for (const [description, amount, category, day] of SEED_RECURRING) {
       const date = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - back, day));
       if (date <= today) add(description, amount, category, date);
     }
   }
-  for (const [description, amount, category, daysAgo] of SEED_ONE_OFF) {
-    add(description, amount, category, new Date(today.getTime() - daysAgo * DAY_MS));
+  for (const { offsetDays, scale } of ONE_OFF_CYCLES) {
+    for (const [description, amount, category, daysAgo] of SEED_ONE_OFF) {
+      const scaled = Math.round(amount * scale * 100) / 100;
+      add(description, scaled, category, new Date(today.getTime() - (daysAgo + offsetDays) * DAY_MS));
+    }
   }
   return rows;
 }

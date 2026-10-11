@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { supabase } from './lib/supabaseClient';
 import { API_URL, apiFetch } from './lib/api';
 import { TransactionForm } from './components/TransactionForm';
@@ -7,6 +7,9 @@ import { MonthPicker } from './components/MonthPicker';
 import { SummaryCards } from './components/SummaryCards';
 import { BudgetList } from './components/BudgetList';
 import { currentMonth } from './lib/month';
+
+// Recharts is the biggest dependency, so it loads after the dashboard renders.
+const Charts = lazy(() => import('./components/Charts'));
 import './App.css';
 
 // The API sleeps on Render's free tier, so a cold request can take 30-60s.
@@ -200,6 +203,11 @@ function Dashboard({ session }) {
     [token, month, version],
     showLoadError,
   );
+  const trend = useApiData(
+    () => apiFetch(`/api/summary/trend?end=${month}&months=6`, { token }),
+    [token, month, version],
+    showLoadError,
+  );
   const transactions = useApiData(
     () => {
       const params = new URLSearchParams({ month });
@@ -269,6 +277,10 @@ function Dashboard({ session }) {
 
       <MonthPicker month={month} onChange={setMonth} />
       <SummaryCards summary={summary} />
+
+      <Suspense fallback={<p className="empty">Loading charts…</p>}>
+        <Charts summary={summary} trend={trend} categories={categories ?? []} />
+      </Suspense>
 
       <BudgetList
         categories={categories ?? []}

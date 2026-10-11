@@ -56,3 +56,52 @@ summaryRouter.get('/', async (req, res) => {
       .sort((a, b) => b.spent - a.spent),
   });
 });
+
+const trendQuerySchema = z.object({
+  end: monthSchema,
+  months: z.coerce.number().int().min(1).max(24).default(6),
+});
+
+function shiftMonth(month, delta) {
+  const [y, m] = month.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return date.toISOString().slice(0, 7);
+}
+
+// Income and spending per month for the `months` months ending at `end`.
+// Months with no activity are included as zeros so the chart has no gaps.
+summaryRouter.get('/trend', async (req, res) => {
+  const query = trendQuerySchema.safeParse(req.query);
+  if (!query.success) {
+    return res.status(400).json({ error: 'Invalid query', fields: z.flattenError(query.error).fieldErrors });
+  }
+
+  const { end, months } = query.data;
+  const monthList = Array.from({ length: months }, (_, i) => shiftMonth(end, i - months + 1));
+  const [start] = monthRange(monthList[0]);
+  const [, endExclusive] = monthRange(end);
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('amount, occurred_at')
+    .eq('user_id', req.user.id)
+    .gte('occurred_at', start)
+    .lt('occurred_at', endExclusive);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const totals = new Map(monthList.map((m) => [m, { incomeCents: 0, expenseCents: 0 }]));
+  for (const { amount, occurred_at } of data) {
+    const bucket = totals.get(occurred_at.slice(0, 7));
+    const cents = toCents(amount);
+    if (cents > 0) bucket.incomeCents += cents;
+    else bucket.expenseCents -= cents;
+  }
+
+  res.json(
+    monthList.map((month) => {
+      const { incomeCents, expenseCents } = totals.get(month);
+      return { month, income: fromCents(incomeCents), expenses: fromCents(expenseCents) };
+    }),
+  );
+});
