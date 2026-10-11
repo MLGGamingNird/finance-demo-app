@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { transactionsRouter } from './routes/transactions.js';
 import { demoRouter } from './routes/demo.js';
+import { categoriesRouter } from './routes/categories.js';
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -12,6 +13,7 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/transactions', transactionsRouter);
+app.use('/api/categories', categoriesRouter);
 app.use('/api/demo', demoRouter);
 
 app.listen(port, () => {

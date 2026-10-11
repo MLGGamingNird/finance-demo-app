@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import { Router } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase.js';
+import { listCategories, seedDefaultCategories } from '../lib/categories.js';
 
 export const demoRouter = Router();
 
@@ -79,17 +80,27 @@ async function signInDemoUser() {
   return result.data;
 }
 
+function daysAgoAsDate(daysAgo) {
+  return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 async function resetDemoData(userId) {
+  // Wipe anything a previous visitor added, including custom categories.
   const { error: deleteError } = await supabase.from('transactions').delete().eq('user_id', userId);
   if (deleteError) throw deleteError;
 
-  const now = Date.now();
+  const { error: categoriesError } = await supabase.from('categories').delete().eq('user_id', userId);
+  if (categoriesError) throw categoriesError;
+
+  await seedDefaultCategories(userId);
+  const categoryIds = new Map((await listCategories(userId)).map((c) => [c.name, c.id]));
+
   const rows = SEED_TRANSACTIONS.map(([description, amount, category, daysAgo]) => ({
     user_id: userId,
     description,
     amount,
-    category,
-    occurred_at: new Date(now - daysAgo * 24 * 60 * 60 * 1000).toISOString(),
+    category_id: categoryIds.get(category) ?? null,
+    occurred_at: daysAgoAsDate(daysAgo),
   }));
 
   const { error: insertError } = await supabase.from('transactions').insert(rows);

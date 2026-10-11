@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabaseClient';
+import { API_URL, apiFetch } from './lib/api';
+import { TransactionForm } from './components/TransactionForm';
+import { TransactionList } from './components/TransactionList';
 import './App.css';
-
-const API_URL = import.meta.env.VITE_API_URL;
 
 // The API sleeps on Render's free tier, so a cold request can take 30-60s.
 // Returns true once `pending` has lasted long enough to be worth explaining.
@@ -158,50 +159,54 @@ function AuthForm() {
 }
 
 function Dashboard({ session }) {
+  const token = session.access_token;
   const [transactions, setTransactions] = useState([]);
-  const [description, setDescription] = useState('');
-  const [amount, setAmount] = useState('');
+  const [categories, setCategories] = useState([]);
+  const [editing, setEditing] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const loadingSlow = useSlowNotice(loading);
 
   async function loadTransactions() {
-    try {
-      const res = await fetch(`${API_URL}/api/transactions`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      if (!res.ok) throw new Error();
-      setTransactions(await res.json());
-    } catch {
-      setError('Failed to load transactions');
-    } finally {
-      setLoading(false);
-    }
+    setTransactions(await apiFetch('/api/transactions', { token }));
   }
 
   useEffect(() => {
-    loadTransactions();
+    Promise.all([apiFetch('/api/categories', { token }), apiFetch('/api/transactions', { token })])
+      .then(([cats, txns]) => {
+        setCategories(cats);
+        setTransactions(txns);
+      })
+      .catch(() => setError('Failed to load transactions'))
+      .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleAdd(e) {
-    e.preventDefault();
-    setError(null);
-    const res = await fetch(`${API_URL}/api/transactions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ description, amount: Number(amount) }),
-    });
-    if (!res.ok) {
-      setError('Failed to add transaction');
-      return;
+  // Errors propagate so the form can show field-level messages.
+  async function handleSave(payload) {
+    if (editing) {
+      await apiFetch(`/api/transactions/${editing.id}`, { token, method: 'PATCH', body: payload });
+      setEditing(null);
+    } else {
+      await apiFetch('/api/transactions', { token, method: 'POST', body: payload });
     }
-    setDescription('');
-    setAmount('');
-    loadTransactions();
+    await loadTransactions();
+  }
+
+  function handleEdit(transaction) {
+    setEditing(transaction);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function handleDelete(transaction) {
+    setError(null);
+    try {
+      await apiFetch(`/api/transactions/${transaction.id}`, { token, method: 'DELETE' });
+      if (editing?.id === transaction.id) setEditing(null);
+      await loadTransactions();
+    } catch {
+      setError('Failed to delete transaction');
+    }
   }
 
   return (
@@ -213,38 +218,25 @@ function Dashboard({ session }) {
         </button>
       </header>
 
-      <form onSubmit={handleAdd} className="add-form">
-        <input
-          type="text"
-          placeholder="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          required
-        />
-        <input
-          type="number"
-          step="0.01"
-          placeholder="Amount"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          required
-        />
-        <button type="submit">Add</button>
-      </form>
+      <TransactionForm
+        key={editing?.id ?? 'new'}
+        categories={categories}
+        transaction={editing}
+        onSubmit={handleSave}
+        onCancel={() => setEditing(null)}
+      />
 
       {loadingSlow && <WakingNotice />}
       {error && <p className="error">{error}</p>}
 
-      <ul className="transaction-list">
-        {transactions.map((t) => (
-          <li key={t.id}>
-            <span>{t.description}</span>
-            <span>{Number(t.amount).toFixed(2)}</span>
-          </li>
-        ))}
-        {loading && <li className="empty">Loading…</li>}
-        {!loading && transactions.length === 0 && <li className="empty">No transactions yet</li>}
-      </ul>
+      <TransactionList
+        transactions={transactions}
+        categories={categories}
+        loading={loading}
+        editingId={editing?.id}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+      />
     </div>
   );
 }
