@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: Client lint & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  server:
+    name: Server lint & tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.120.0
+
+      # A throwaway Supabase (Postgres + Auth + API) built from
+      # supabase/migrations, so tests never touch the real project.
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Export local Supabase credentials
+        run: |
+          eval "$(supabase status -o env)"
+          if [ -z "$API_URL" ] || [ -z "$SERVICE_ROLE_KEY" ] || [ -z "$ANON_KEY" ]; then
+            echo "Unexpected 'supabase status' output. Available variables:"
+            supabase status -o env | cut -d= -f1
+            exit 1
+          fi
+          {
+            echo "SUPABASE_URL=$API_URL"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "SUPABASE_ANON_KEY=$ANON_KEY"
+          } >> "$GITHUB_ENV"
+
+      - name: Install
+        working-directory: server
+        run: npm ci
+
+      - name: Lint
+        working-directory: server
+        run: npm run lint
+
+      - name: Test
+        working-directory: server
+        run: npm test
+        env:
+          REQUIRE_INTEGRATION: '1'

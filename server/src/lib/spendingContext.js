@@ -2,6 +2,7 @@ import { supabase } from './supabase.js';
 import { listCategories } from './categories.js';
 import { monthRange, shiftMonth } from './month.js';
 import { formatUsd, fromCents, toCents } from './money.js';
+import { spendingByMonth, topMerchants } from './spending.js';
 
 const MONTHS = 6;
 
@@ -18,17 +19,24 @@ export async function buildSpendingContext(userId, today = new Date()) {
   const [start] = monthRange(months[0]);
   const [, end] = monthRange(currentMonth);
 
-  const [txResult, categories, budgetResult] = await Promise.all([
+  const [currentStart] = monthRange(currentMonth);
+  const [rows, merchants, largestResult, categories, budgetResult] = await Promise.all([
+    spendingByMonth(userId, start, end),
+    topMerchants(userId, start, end, 8),
+    // Most negative amounts first = largest expenses.
     supabase
       .from('transactions')
       .select('description, amount, category_id, occurred_at')
       .eq('user_id', userId)
-      .gte('occurred_at', start)
-      .lt('occurred_at', end),
+      .lt('amount', 0)
+      .gte('occurred_at', currentStart)
+      .lt('occurred_at', end)
+      .order('amount', { ascending: true })
+      .limit(5),
     listCategories(userId),
     supabase.from('budgets').select('category_id, amount').eq('user_id', userId),
   ]);
-  if (txResult.error) throw txResult.error;
+  if (largestResult.error) throw largestResult.error;
   if (budgetResult.error) throw budgetResult.error;
 
   const categoryName = new Map(categories.map((c) => [c.id, c.name]));
@@ -37,30 +45,17 @@ export async function buildSpendingContext(userId, today = new Date()) {
 
   const monthly = new Map(months.map((m) => [m, { income: 0, spending: 0 }]));
   const byCategory = new Map(); // category_id -> { [month]: cents }
-  const merchants = new Map(); // description -> { cents, count }
-  const thisMonthExpenses = [];
 
-  for (const t of txResult.data) {
-    const month = t.occurred_at.slice(0, 7);
-    const cents = toCents(t.amount);
-    const totals = monthly.get(month);
-    if (cents > 0) {
-      totals.income += cents;
-      continue;
-    }
-    const spent = -cents;
+  for (const row of rows) {
+    const totals = monthly.get(row.month);
+    totals.income += toCents(row.income);
+    const spent = toCents(row.expenses);
     totals.spending += spent;
-
-    const key = t.category_id ?? null;
-    const perMonth = byCategory.get(key) ?? {};
-    perMonth[month] = (perMonth[month] ?? 0) + spent;
-    byCategory.set(key, perMonth);
-
-    const merchant = t.description.trim();
-    const m = merchants.get(merchant) ?? { cents: 0, count: 0 };
-    merchants.set(merchant, { cents: m.cents + spent, count: m.count + 1 });
-
-    if (month === currentMonth) thisMonthExpenses.push({ ...t, spent });
+    if (spent > 0) {
+      const perMonth = byCategory.get(row.category_id) ?? {};
+      perMonth[row.month] = (perMonth[row.month] ?? 0) + spent;
+      byCategory.set(row.category_id, perMonth);
+    }
   }
 
   const money = (cents) => formatUsd(fromCents(cents));
@@ -102,15 +97,14 @@ export async function buildSpendingContext(userId, today = new Date()) {
   }
 
   lines.push('', `TOP MERCHANTS BY SPENDING (last ${MONTHS} months)`);
-  for (const [name, { cents, count }] of [...merchants].sort((a, b) => b[1].cents - a[1].cents).slice(0, 8)) {
-    lines.push(`- ${name}: ${money(cents)} across ${count} transaction${count === 1 ? '' : 's'}`);
+  for (const { description, spent, transaction_count: count } of merchants) {
+    lines.push(`- ${description}: ${money(toCents(spent))} across ${count} transaction${count === 1 ? '' : 's'}`);
   }
 
   lines.push('', 'LARGEST EXPENSES THIS MONTH');
-  const largest = thisMonthExpenses.sort((a, b) => b.spent - a.spent).slice(0, 5);
-  if (largest.length === 0) lines.push('- none yet');
-  for (const t of largest) {
-    lines.push(`- ${t.occurred_at}: ${t.description} (${nameOf(t.category_id)}) ${money(t.spent)}`);
+  if (largestResult.data.length === 0) lines.push('- none yet');
+  for (const t of largestResult.data) {
+    lines.push(`- ${t.occurred_at}: ${t.description} (${nameOf(t.category_id)}) ${money(-toCents(t.amount))}`);
   }
 
   return lines.join('\n');
