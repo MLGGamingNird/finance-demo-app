@@ -248,6 +248,168 @@ button.link.danger {
   color: #f87171;
 }
 
+.month-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.month-label {
+  font-weight: 600;
+  min-width: 9.5rem;
+  text-align: center;
+}
+
+button.icon {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 0.3rem 0.75rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+button.icon:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 0.75rem;
+  min-width: 0;
+}
+
+.card-label {
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.card-value {
+  font-size: 1.15rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.card-value.income {
+  color: #4ade80;
+}
+
+.card-value.expense {
+  color: #f87171;
+}
+
+section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.budget-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.budget-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+  margin-bottom: 0.3rem;
+}
+
+.budget-numbers {
+  color: #94a3b8;
+  text-align: right;
+}
+
+.budget-numbers.over {
+  color: #f87171;
+}
+
+.progress {
+  height: 8px;
+  background: #1e293b;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.progress-fill.ok {
+  background: #22c55e;
+}
+
+.progress-fill.near {
+  background: #f59e0b;
+}
+
+.progress-fill.over {
+  background: #ef4444;
+}
+
+.budget-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+}
+
+.budget-edit-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.budget-edit-row input {
+  width: 9rem;
+}
+
+.hint {
+  margin: 0 0 0.25rem;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -258,11 +420,21 @@ button.link.danger {
 }
 
 @media (max-width: 480px) {
+  .card-value {
+    font-size: 1rem;
+  }
+
   .form-row {
     flex-wrap: wrap;
   }
 
-  .form-row label.grow {
+  .form-row label.grow,
+  .form-row label.amount {
     flex-basis: 100%;
+  }
+
+  /* Date and the submit button share the last line. */
+  .form-row label:not(.grow):not(.amount) {
+    flex: 1;
   }
 }

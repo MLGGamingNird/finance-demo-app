@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { formatAmount, formatDate } from '../lib/format';
 
-export function TransactionList({ transactions, categories, loading, editingId, onEdit, onDelete }) {
+export function TransactionList({ transactions, categories, loading, emptyMessage, editingId, onEdit, onDelete }) {
   // Delete takes two clicks: the first arms it, the second confirms.
   const [confirmingId, setConfirmingId] = useState(null);
   const categoryNames = new Map(categories.map((c) => [c.id, c.name]));
 
   if (loading) return <p className="empty">Loading…</p>;
-  if (transactions.length === 0) return <p className="empty">No transactions yet</p>;
+  if (transactions.length === 0) return <p className="empty">{emptyMessage}</p>;
 
   return (
     <ul className="transaction-list">

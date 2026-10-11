@@ -1,6 +1,10 @@
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const shortDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
+export function formatCurrency(amount) {
+  return currency.format(Number(amount));
+}
+
 export function formatAmount(amount) {
   const n = Number(amount);
   return `${n > 0 ? '+' : '−'}${currency.format(Math.abs(n))}`;

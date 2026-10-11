@@ -3,6 +3,10 @@ import { supabase } from './lib/supabaseClient';
 import { API_URL, apiFetch } from './lib/api';
 import { TransactionForm } from './components/TransactionForm';
 import { TransactionList } from './components/TransactionList';
+import { MonthPicker } from './components/MonthPicker';
+import { SummaryCards } from './components/SummaryCards';
+import { BudgetList } from './components/BudgetList';
+import { currentMonth } from './lib/month';
 import './App.css';
 
 // The API sleeps on Render's free tier, so a cold request can take 30-60s.
@@ -158,29 +162,56 @@ function AuthForm() {
   );
 }
 
-function Dashboard({ session }) {
-  const token = session.access_token;
-  const [transactions, setTransactions] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [editing, setEditing] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const loadingSlow = useSlowNotice(loading);
-
-  async function loadTransactions() {
-    setTransactions(await apiFetch('/api/transactions', { token }));
-  }
+// Runs `load` whenever deps change and ignores responses from stale runs,
+// so flipping quickly between months can't show the wrong month's data.
+function useApiData(load, deps, onError) {
+  const [data, setData] = useState(null);
 
   useEffect(() => {
-    Promise.all([apiFetch('/api/categories', { token }), apiFetch('/api/transactions', { token })])
-      .then(([cats, txns]) => {
-        setCategories(cats);
-        setTransactions(txns);
-      })
-      .catch(() => setError('Failed to load transactions'))
-      .finally(() => setLoading(false));
+    let current = true;
+    load()
+      .then((result) => current && setData(result))
+      .catch((err) => current && onError(err));
+    return () => {
+      current = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, deps);
+
+  return data;
+}
+
+function Dashboard({ session }) {
+  const token = session.access_token;
+  const [month, setMonth] = useState(currentMonth);
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [error, setError] = useState(null);
+  // Bumped after any write so the dependent queries refetch.
+  const [version, setVersion] = useState(0);
+  const refresh = () => setVersion((v) => v + 1);
+
+  const showLoadError = () => setError('Something went wrong loading your data. Please refresh.');
+
+  const categories = useApiData(() => apiFetch('/api/categories', { token }), [token], showLoadError);
+  const budgets = useApiData(() => apiFetch('/api/budgets', { token }), [token, version], showLoadError);
+  const summary = useApiData(
+    () => apiFetch(`/api/summary?month=${month}`, { token }),
+    [token, month, version],
+    showLoadError,
+  );
+  const transactions = useApiData(
+    () => {
+      const params = new URLSearchParams({ month });
+      if (categoryFilter) params.set('category_id', categoryFilter);
+      return apiFetch(`/api/transactions?${params}`, { token });
+    },
+    [token, month, categoryFilter, version],
+    showLoadError,
+  );
+
+  const loading = transactions === null || categories === null;
+  const loadingSlow = useSlowNotice(loading);
 
   // Errors propagate so the form can show field-level messages.
   async function handleSave(payload) {
@@ -190,7 +221,7 @@ function Dashboard({ session }) {
     } else {
       await apiFetch('/api/transactions', { token, method: 'POST', body: payload });
     }
-    await loadTransactions();
+    refresh();
   }
 
   function handleEdit(transaction) {
@@ -203,40 +234,90 @@ function Dashboard({ session }) {
     try {
       await apiFetch(`/api/transactions/${transaction.id}`, { token, method: 'DELETE' });
       if (editing?.id === transaction.id) setEditing(null);
-      await loadTransactions();
+      refresh();
     } catch {
       setError('Failed to delete transaction');
+    }
+  }
+
+  async function handleSaveBudgets(changes) {
+    try {
+      await Promise.all(
+        changes.map(({ categoryId, amount }) =>
+          amount === null
+            ? apiFetch(`/api/budgets/${categoryId}`, { token, method: 'DELETE' })
+            : apiFetch(`/api/budgets/${categoryId}`, { token, method: 'PUT', body: { amount } }),
+        ),
+      );
+    } finally {
+      // Some writes may have landed even if one failed.
+      refresh();
     }
   }
 
   return (
     <div className="dashboard">
       <header>
-        <h1>Transactions</h1>
+        <h1>Finance Demo</h1>
         <button type="button" onClick={() => supabase.auth.signOut()}>
           Log out
         </button>
       </header>
 
-      <TransactionForm
-        key={editing?.id ?? 'new'}
-        categories={categories}
-        transaction={editing}
-        onSubmit={handleSave}
-        onCancel={() => setEditing(null)}
-      />
-
       {loadingSlow && <WakingNotice />}
       {error && <p className="error">{error}</p>}
 
-      <TransactionList
-        transactions={transactions}
-        categories={categories}
-        loading={loading}
-        editingId={editing?.id}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
+      <MonthPicker month={month} onChange={setMonth} />
+      <SummaryCards summary={summary} />
+
+      <BudgetList
+        categories={categories ?? []}
+        budgets={budgets ?? []}
+        summary={summary}
+        onSave={handleSaveBudgets}
       />
+
+      <section className="transactions">
+        <div className="section-header">
+          <h2>Transactions</h2>
+          <label>
+            <span className="sr-only">Filter by category</span>
+            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+              <option value="">All categories</option>
+              {['expense', 'income'].map((kind) => (
+                <optgroup key={kind} label={kind === 'expense' ? 'Expenses' : 'Income'}>
+                  {(categories ?? [])
+                    .filter((c) => c.kind === kind)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                </optgroup>
+              ))}
+              <option value="none">Uncategorized</option>
+            </select>
+          </label>
+        </div>
+
+        <TransactionForm
+          key={editing?.id ?? 'new'}
+          categories={categories ?? []}
+          transaction={editing}
+          onSubmit={handleSave}
+          onCancel={() => setEditing(null)}
+        />
+
+        <TransactionList
+          transactions={transactions ?? []}
+          categories={categories ?? []}
+          loading={loading}
+          emptyMessage={categoryFilter ? 'No matching transactions this month' : 'No transactions this month'}
+          editingId={editing?.id}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+        />
+      </section>
     </div>
   );
 }

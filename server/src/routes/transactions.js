@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { requireAuth } from '../lib/requireAuth.js';
 import { PG_FOREIGN_KEY_VIOLATION, validateBody, validateIdParam } from '../lib/validate.js';
+import { monthRange, monthSchema } from '../lib/month.js';
 
 export const transactionsRouter = Router();
 
@@ -43,11 +44,29 @@ function sendDbError(res, error) {
   res.status(500).json({ error: error.message });
 }
 
+// Optional filters: ?month=YYYY-MM and ?category_id=<uuid>|none.
+const listQuerySchema = z.object({
+  month: monthSchema.optional(),
+  category_id: z.union([z.uuid('Invalid category'), z.literal('none')]).optional(),
+});
+
 transactionsRouter.get('/', async (req, res) => {
-  const { data, error } = await supabase
-    .from('transactions')
-    .select(COLUMNS)
-    .eq('user_id', req.user.id)
+  const query = listQuerySchema.safeParse(req.query);
+  if (!query.success) {
+    return res.status(400).json({ error: 'Invalid query', fields: z.flattenError(query.error).fieldErrors });
+  }
+  const { month, category_id } = query.data;
+
+  let request = supabase.from('transactions').select(COLUMNS).eq('user_id', req.user.id);
+
+  if (month) {
+    const [start, end] = monthRange(month);
+    request = request.gte('occurred_at', start).lt('occurred_at', end);
+  }
+  if (category_id === 'none') request = request.is('category_id', null);
+  else if (category_id) request = request.eq('category_id', category_id);
+
+  const { data, error } = await request
     .order('occurred_at', { ascending: false })
     .order('created_at', { ascending: false });
 
