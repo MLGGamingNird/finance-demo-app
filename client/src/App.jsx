@@ -4,6 +4,31 @@ import './App.css';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+// The API sleeps on Render's free tier, so a cold request can take 30-60s.
+// Returns true once `pending` has lasted long enough to be worth explaining.
+function useSlowNotice(pending, delayMs = 3000) {
+  const [slow, setSlow] = useState(false);
+
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => setSlow(true), delayMs);
+    return () => {
+      clearTimeout(timer);
+      setSlow(false);
+    };
+  }, [pending, delayMs]);
+
+  return slow;
+}
+
+function WakingNotice() {
+  return (
+    <p className="notice">
+      Waking up the server… this can take up to a minute on the free hosting tier.
+    </p>
+  );
+}
+
 function AuthForm() {
   const [step, setStep] = useState('email');
   const [email, setEmail] = useState('');
@@ -12,6 +37,28 @@ function AuthForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [mode, setMode] = useState('login');
   const [error, setError] = useState(null);
+  const [demoLoading, setDemoLoading] = useState(false);
+  const demoSlow = useSlowNotice(demoLoading);
+
+  // Start waking the API while the user is still on the login screen.
+  useEffect(() => {
+    fetch(`${API_URL}/health`).catch(() => {});
+  }, []);
+
+  async function handleDemo() {
+    setError(null);
+    setDemoLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/demo/session`, { method: 'POST' });
+      if (!res.ok) throw new Error();
+      const { access_token, refresh_token } = await res.json();
+      const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+      if (error) throw error;
+    } catch {
+      setError('Could not start the demo. Please try again.');
+      setDemoLoading(false);
+    }
+  }
 
   function switchMode() {
     setMode(mode === 'login' ? 'signup' : 'login');
@@ -61,6 +108,11 @@ function AuthForm() {
         <button type="button" className="link" onClick={switchMode}>
           {mode === 'login' ? 'Need an account? Sign up' : 'Have an account? Log in'}
         </button>
+        <div className="divider">or</div>
+        <button type="button" className="secondary" onClick={handleDemo} disabled={demoLoading}>
+          {demoLoading ? 'Starting demo…' : 'Try the demo — no sign-up'}
+        </button>
+        {demoSlow && <WakingNotice />}
         {error && <p className="error">{error}</p>}
       </form>
     );
@@ -110,16 +162,21 @@ function Dashboard({ session }) {
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const loadingSlow = useSlowNotice(loading);
 
   async function loadTransactions() {
-    const res = await fetch(`${API_URL}/api/transactions`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-    if (!res.ok) {
+    try {
+      const res = await fetch(`${API_URL}/api/transactions`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) throw new Error();
+      setTransactions(await res.json());
+    } catch {
       setError('Failed to load transactions');
-      return;
+    } finally {
+      setLoading(false);
     }
-    setTransactions(await res.json());
   }
 
   useEffect(() => {
@@ -175,6 +232,7 @@ function Dashboard({ session }) {
         <button type="submit">Add</button>
       </form>
 
+      {loadingSlow && <WakingNotice />}
       {error && <p className="error">{error}</p>}
 
       <ul className="transaction-list">
@@ -184,7 +242,8 @@ function Dashboard({ session }) {
             <span>{Number(t.amount).toFixed(2)}</span>
           </li>
         ))}
-        {transactions.length === 0 && <li className="empty">No transactions yet</li>}
+        {loading && <li className="empty">Loading…</li>}
+        {!loading && transactions.length === 0 && <li className="empty">No transactions yet</li>}
       </ul>
     </div>
   );
