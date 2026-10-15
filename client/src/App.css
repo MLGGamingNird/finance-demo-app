@@ -157,6 +157,154 @@ input[type='date'] {
   color-scheme: dark;
 }
 
+.section-tools {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+}
+
+.import-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.import-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.import-help,
+.import-file,
+.import-summary,
+.import-result {
+  margin: 0;
+}
+
+.import-help,
+.hint {
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.import-result {
+  color: #4ade80;
+}
+
+.import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.file-button {
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+}
+
+.file-button:focus-within {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.column-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem 0.75rem;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+}
+
+.column-picker legend {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.column-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1 1 8rem;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.flip-signs {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
+
+.flip-signs input {
+  padding: 0;
+}
+
+.import-errors {
+  font-size: 0.85rem;
+  color: #fbbf24;
+}
+
+.import-errors ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.import-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.import-table th,
+.import-table td {
+  padding: 0.35rem 0.25rem;
+  border-bottom: 1px solid #1e293b;
+  text-align: left;
+}
+
+.import-table th {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.import-table th:last-child,
+.import-table td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.import-table td:first-child {
+  white-space: nowrap;
+}
+
+.import-table td.income {
+  color: #4ade80;
+}
+
+.import-table td.expense {
+  color: #f87171;
+}
+
+.import-table tr.duplicate td {
+  opacity: 0.55;
+}
+
 .field-error {
   color: #f87171;
   font-size: 0.8rem;

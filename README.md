@@ -11,6 +11,7 @@ A personal finance tracker with budgets, spending charts, and AI features: trans
 ## Features
 
 - **Transactions:** add, edit and delete income and expenses, with categories and dates; filter by month and category; long months load in pages.
+- **CSV import:** upload a bank export, check the columns and a preview, and import. Rows you've imported before are skipped, and new ones are categorized automatically. There's a sample export to try it with.
 - **Budgets:** monthly limits per category with progress bars that turn amber at 80% and red when over.
 - **Dashboard:** month picker, income/spending/net summary, spending by category, and a six-month income vs. spending trend. Every chart has a table view.
 - **AI auto-categorization:** leave the category on "Auto" and the server picks one, from your own history first, then from an LLM. Auto-picked categories are tagged so you can tell.
@@ -59,6 +60,8 @@ The browser talks to Supabase only for authentication. All data goes through the
 
 **Cursor pagination.** The transaction list loads 15 at a time. Each page carries a cursor holding the last row's sort key (date, created time, id), so a row added or deleted while you're paging can't cause duplicates or gaps the way an offset would. The id breaks ties between rows created in the same insert.
 
+**CSV import that's safe to repeat.** Every bank formats its export differently, so the server finds the date, description and amount columns from common header names (or separate money-in and money-out columns), and the preview lets you pick them when it guesses wrong. Amounts are parsed straight to integer cents, including `$1,234.56`, `(12.00)` and trailing minus signs. Ambiguous dates like 03/04 are read month-first unless another row in the file only makes sense day-first. Each imported row stores a hash of its date, amount and description, plus a counter so two identical coffees on the same day stay separate, and a unique constraint on `(user_id, import_hash)` makes a repeated or overlapping import skip what's already there, even if two imports race. Rows the server can't read are listed instead of failing the whole file. Categorization reads your history in one query and sends only the remaining unique descriptions to the model, 40 at a time.
+
 **Dates, not timestamps.** A transaction happens on a day. Storing a `date` avoids the classic off-by-one-day bug when the browser and server are in different time zones.
 
 **AI that fails safe.**
@@ -79,8 +82,8 @@ The browser talks to Supabase only for authentication. All data goes through the
 cd server && npm test
 ```
 
-- **Unit tests:** month and money helpers, and the rate limiter.
-- **Integration tests (Supertest):** run the whole API against a real Postgres, Auth and PostgREST stack. They cover authentication, validation errors, CRUD, budgets, exact totals, auto-categorization fallbacks, demo sandboxes (separate, capped, expired ones deleted), and the isolation suite: a second user can't read, edit, delete, reference, budget or aggregate the first user's data, through the API or directly in Postgres.
+- **Unit tests:** month and money helpers, the rate limiter, pagination cursors, and the CSV parser and bank-file reader.
+- **Integration tests (Supertest):** run the whole API against a real Postgres, Auth and PostgREST stack. They cover authentication, validation errors, CRUD, budgets, exact totals, auto-categorization fallbacks, CSV imports (preview, repeat imports, per-user duplicates, large files), demo sandboxes (separate, capped, expired ones deleted), and the isolation suite: a second user can't read, edit, delete, reference, budget or aggregate the first user's data, through the API or directly in Postgres.
 - **CI:** [GitHub Actions](.github/workflows/ci.yml) lints and builds the client, then starts a throwaway local Supabase from `supabase/migrations/` and runs the server tests against it, so CI needs no secrets and never touches the real database. The integration tests refuse to run against a remote database unless `ALLOW_REMOTE_TESTS=1` is set.
 
 ## Running locally
@@ -114,8 +117,8 @@ client/src/
   lib/                    API client, formatting, month helpers
 server/src/
   app.js                  Express app (index.js starts it)
-  routes/                 transactions, categories, budgets, summary, chat, demo
-  lib/                    auth, validation, Groq client, categorizer, chat context, rate limiter
+  routes/                 transactions, imports, categories, budgets, summary, chat, demo
+  lib/                    auth, validation, Groq client, categorizer, chat context, rate limiter, CSV import
 server/test/              unit and integration tests
 supabase/migrations/      schema history, applied in order
 ```

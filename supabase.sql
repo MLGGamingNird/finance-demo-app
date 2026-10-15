@@ -28,11 +28,15 @@ create table transactions (
   auto_categorized boolean not null default false,
   occurred_at date not null default current_date,
   created_at timestamptz not null default now(),
+  -- Set on CSV imports: a hash of date, amount and description, so importing
+  -- the same file twice doesn't duplicate rows. NULLs never conflict.
+  import_hash text,
   -- A transaction can only reference a category owned by the same user.
   constraint transactions_category_fk
     foreign key (category_id, user_id)
     references categories (id, user_id)
-    on delete set null (category_id)
+    on delete set null (category_id),
+  constraint transactions_user_import_hash_key unique (user_id, import_hash)
 );
 
 create index transactions_user_date_idx on transactions (user_id, occurred_at desc);
@@ -126,3 +130,20 @@ create index demo_sandboxes_created_at_idx on demo_sandboxes (created_at);
 -- RLS with no policies: only the server's service role can read or write it.
 alter table demo_sandboxes enable row level security;
 revoke all on demo_sandboxes from anon, authenticated;
+
+-- Which of these hashes the user already has, for the import preview.
+create function existing_import_hashes(p_user_id uuid, p_hashes text[])
+returns setof text
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select t.import_hash
+  from public.transactions t
+  where t.user_id = p_user_id
+    and t.import_hash = any (p_hashes)
+$$;
+
+revoke execute on function existing_import_hashes(uuid, text[]) from public, anon, authenticated;
+grant execute on function existing_import_hashes(uuid, text[]) to service_role;

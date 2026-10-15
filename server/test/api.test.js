@@ -256,6 +256,72 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
     });
   });
 
+  describe('CSV import', () => {
+    const csv = [
+      'Transaction Date,Description,Amount',
+      '03/01/2018,Blue Bottle Coffee,-4.50',
+      '03/01/2018,Blue Bottle Coffee,-4.50',
+      '03/02/2018,Mystery Shop 9921,-20.00',
+      '03/03/2018,Paycheck,1000.00',
+      'oops,Broken row,-1',
+    ].join('\n');
+
+    it('previews, imports once, and skips the same rows on a second import', async () => {
+      const food = await categoryId(alice, 'Food & Drink');
+      await as(alice).post('/api/transactions', { description: 'blue bottle coffee', amount: -6, category_id: food });
+
+      const preview = await as(alice).post('/api/imports/preview', { csv });
+      expect(preview.status).toBe(200);
+      expect(preview.body).toMatchObject({ total: 4, duplicates: 0, error_count: 1, suggest_flip: false });
+      expect(preview.body.columns).toMatchObject({ date: 0, description: 1, amount: 2 });
+
+      const first = await as(alice).post('/api/imports', { csv });
+      expect(first.status).toBe(201);
+      // Both coffees match history; nothing else does without AI.
+      expect(first.body).toEqual({ imported: 4, duplicates: 0, categorized: 2, error_count: 1 });
+
+      const march = await as(alice).get('/api/transactions?month=2018-03');
+      const coffees = march.body.items.filter((t) => t.description === 'Blue Bottle Coffee');
+      expect(coffees).toHaveLength(2);
+      expect(coffees.every((t) => t.category_id === food && t.auto_categorized)).toBe(true);
+
+      const again = await as(alice).post('/api/imports/preview', { csv });
+      expect(again.body).toMatchObject({ total: 4, duplicates: 4 });
+      const second = await as(alice).post('/api/imports', { csv });
+      expect(second.body).toMatchObject({ imported: 0, duplicates: 4 });
+      expect((await as(alice).get('/api/transactions?month=2018-03')).body.items).toHaveLength(march.body.items.length);
+    });
+
+    it("keeps each user's duplicate check separate", async () => {
+      const preview = await as(bob).post('/api/imports/preview', { csv });
+      expect(preview.body).toMatchObject({ total: 4, duplicates: 0 });
+    });
+
+    it('accepts files over the default body limit', async () => {
+      const rows = Array.from({ length: 1500 }, (_, i) => `2017-01-${String((i % 28) + 1).padStart(2, '0')},Bulk row ${i} ${'x'.repeat(60)},-1.00`);
+      const big = ['Date,Description,Amount', ...rows].join('\n');
+      expect(big.length).toBeGreaterThan(100_000);
+      const preview = await as(bob).post('/api/imports/preview', { csv: big });
+      expect(preview.status).toBe(200);
+      expect(preview.body.total).toBe(1500);
+    });
+
+    it('returns the header when it cannot find the columns, and rejects bad requests', async () => {
+      const unknown = await as(alice).post('/api/imports/preview', { csv: 'When,What,How much\n2018-03-01,Coffee,-5\n' });
+      expect(unknown.status).toBe(400);
+      expect(unknown.body.header).toEqual(['When', 'What', 'How much']);
+
+      const chosen = await as(alice).post('/api/imports/preview', {
+        csv: 'When,What,How much\n2018-03-01,Coffee,-5\n',
+        columns: { date: 0, description: 1, amount: 2, debit: -1, credit: -1 },
+      });
+      expect(chosen.body.total).toBe(1);
+
+      expect((await as(alice).post('/api/imports/preview', {})).status).toBe(400);
+      expect((await request(app).post('/api/imports/preview').send({ csv })).status).toBe(401);
+    });
+  });
+
   describe('chat', () => {
     it('reports that AI is not configured instead of failing', async () => {
       const res = await as(alice).post('/api/chat', { messages: [{ role: 'user', content: 'Hi' }] });

@@ -7,6 +7,7 @@ import { MonthPicker } from './components/MonthPicker';
 import { SummaryCards } from './components/SummaryCards';
 import { BudgetList } from './components/BudgetList';
 import { SpendingChat } from './components/SpendingChat';
+import { ImportCsv } from './components/ImportCsv';
 import { currentMonth } from './lib/month';
 
 // Recharts is the biggest dependency, so it loads after the dashboard renders.
@@ -192,6 +193,7 @@ function Dashboard({ session }) {
   const [month, setMonth] = useState(currentMonth);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [editing, setEditing] = useState(null);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState(null);
   // Bumped after any write so the dependent queries refetch.
   const [version, setVersion] = useState(0);
@@ -328,25 +330,32 @@ function Dashboard({ session }) {
       <section className="transactions">
         <div className="section-header">
           <h2>Transactions</h2>
-          <label>
-            <span className="sr-only">Filter by category</span>
-            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-              <option value="">All categories</option>
-              {['expense', 'income'].map((kind) => (
-                <optgroup key={kind} label={kind === 'expense' ? 'Expenses' : 'Income'}>
-                  {(categories ?? [])
-                    .filter((c) => c.kind === kind)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-              <option value="none">Uncategorized</option>
-            </select>
-          </label>
+          <div className="section-tools">
+            <button type="button" className="secondary" onClick={() => setImporting(true)} disabled={importing}>
+              Import CSV
+            </button>
+            <label>
+              <span className="sr-only">Filter by category</span>
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                <option value="">All categories</option>
+                {['expense', 'income'].map((kind) => (
+                  <optgroup key={kind} label={kind === 'expense' ? 'Expenses' : 'Income'}>
+                    {(categories ?? [])
+                      .filter((c) => c.kind === kind)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+                <option value="none">Uncategorized</option>
+              </select>
+            </label>
+          </div>
         </div>
+
+        {importing && <ImportCsv token={token} onImported={refresh} onClose={() => setImporting(false)} />}
 
         <TransactionForm
           key={editing?.id ?? 'new'}
