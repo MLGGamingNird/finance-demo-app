@@ -29,7 +29,7 @@ The frontend talks to Supabase directly for auth, but goes through the Express b
 
 ## What's built so far
 
-- Two-step signup/login, plus a one-click **Try the demo** login (shared demo account, reset to six months of sample data on every click)
+- Two-step signup/login, plus a one-click **Try the demo** login (a private sandbox account per click with six months of sample data, deleted after 24 hours; see `server/src/routes/demo.js`)
 - Transactions: add, edit, delete, with income/expense, categories and dates; month + category filters
 - Categories (per-user, income/expense) and monthly budgets with progress bars
 - Dashboard: month picker, summary cards, spending-by-category and income-vs-spending charts (Recharts, lazy-loaded, with table views)
@@ -77,4 +77,4 @@ Both deploys trigger automatically on `git push` to `master`. No manual redeploy
 
 ## Next steps
 
-The two-week plan is done. Ideas from the README's "What I'd do next": paginate transactions, stream chat responses, a shared-store rate limiter, Playwright end-to-end tests, per-visitor demo sandboxes.
+The two-week plan is done. Ideas from the README's "What I'd do next": stream chat responses, a shared-store rate limiter, Playwright end-to-end tests.

@@ -197,7 +197,12 @@ function Dashboard({ session }) {
   const [version, setVersion] = useState(0);
   const refresh = () => setVersion((v) => v + 1);
 
-  const showLoadError = () => setError('Something went wrong loading your data. Please refresh.');
+  // A 401 means the session is gone, such as an expired demo sandbox, so go
+  // back to the login screen instead of showing an error.
+  const showLoadError = (err) => {
+    if (err?.status === 401) supabase.auth.signOut();
+    else setError('Something went wrong loading your data. Please refresh.');
+  };
 
   const categories = useApiData(() => apiFetch('/api/categories', { token }), [token], showLoadError);
   const budgets = useApiData(() => apiFetch('/api/budgets', { token }), [token, version], showLoadError);
@@ -297,6 +302,9 @@ function Dashboard({ session }) {
           Log out
         </button>
       </header>
+      {session.user.app_metadata?.demo && (
+        <p className="sandbox-note">This is your own demo sandbox. Nobody else sees your changes, and it's deleted after 24 hours.</p>
+      )}
 
       {loadingSlow && <WakingNotice />}
       {error && <p className="error">{error}</p>}

@@ -1,18 +1,21 @@
-import { createHmac } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase.js';
 import { listCategories, seedDefaultCategories } from '../lib/categories.js';
+import { rateLimit } from '../lib/rateLimit.js';
 
 export const demoRouter = Router();
 
-const DEMO_EMAIL = 'demo@finance-demo-app.dev';
+// Every "Try the demo" click gets its own throwaway account, so visitors
+// never see each other's changes. Sandboxes expire after a day.
+export const SANDBOX_TTL_MS = 24 * 60 * 60 * 1000;
+// Caps live sandboxes so a flood of clicks can't fill the free-tier database.
+// DEMO_MAX_SANDBOXES overrides it.
+const DEFAULT_MAX_SANDBOXES = 500;
+const CLEANUP_BATCH = 25;
 
-// Derived from the service role key so the password stays server-side
-// without needing another env var.
-const DEMO_PASSWORD = createHmac('sha256', process.env.SUPABASE_SERVICE_ROLE_KEY)
-  .update('finance-demo-user')
-  .digest('hex');
+const demoLimiter = rateLimit({ limit: 10, windowMs: 60 * 60 * 1000, key: (req) => req.ip });
 
 // Negative amounts are expenses. Bills repeat each month on a fixed day:
 // [description, amount, category, day of month]
@@ -116,60 +119,14 @@ function seedRows(userId, categoryIds) {
 }
 
 // A fresh client per sign-in so the shared service-role client never
-// picks up the demo user's session.
+// picks up the sandbox user's session.
 function createSignInClient() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
-async function findDemoUser() {
-  const { data, error } = await supabase.auth.admin.listUsers({ perPage: 1000 });
-  if (error) throw error;
-  return data.users.find((u) => u.email === DEMO_EMAIL) ?? null;
-}
-
-async function ensureDemoUser() {
-  const existing = await findDemoUser();
-  if (existing) {
-    const { error } = await supabase.auth.admin.updateUserById(existing.id, {
-      password: DEMO_PASSWORD,
-      email_confirm: true,
-    });
-    if (error) throw error;
-    return;
-  }
-
-  const { error } = await supabase.auth.admin.createUser({
-    email: DEMO_EMAIL,
-    password: DEMO_PASSWORD,
-    email_confirm: true,
-  });
-  if (error) throw error;
-}
-
-async function signInDemoUser() {
-  const client = createSignInClient();
-  let result = await client.auth.signInWithPassword({ email: DEMO_EMAIL, password: DEMO_PASSWORD });
-
-  if (result.error) {
-    await ensureDemoUser();
-    result = await client.auth.signInWithPassword({ email: DEMO_EMAIL, password: DEMO_PASSWORD });
-    if (result.error) throw result.error;
-  }
-
-  return result.data;
-}
-
-async function resetDemoData(userId) {
-  // Wipe anything a previous visitor added. Deleting categories also
-  // removes their budgets.
-  const { error: deleteError } = await supabase.from('transactions').delete().eq('user_id', userId);
-  if (deleteError) throw deleteError;
-
-  const { error: categoriesError } = await supabase.from('categories').delete().eq('user_id', userId);
-  if (categoriesError) throw categoriesError;
-
+async function seedDemoData(userId) {
   await seedDefaultCategories(userId);
   const categoryIds = new Map((await listCategories(userId)).map((c) => [c.name, c.id]));
 
@@ -182,10 +139,74 @@ async function resetDemoData(userId) {
   if (budgetsError) throw budgetsError;
 }
 
-demoRouter.post('/session', async (req, res) => {
+async function countLiveSandboxes() {
+  const { count, error } = await supabase
+    .from('demo_sandboxes')
+    .select('user_id', { count: 'exact', head: true })
+    .gt('created_at', new Date(Date.now() - SANDBOX_TTL_MS).toISOString());
+  if (error) throw error;
+  return count;
+}
+
+// Deletes the oldest expired sandboxes, a batch at a time. Deleting the auth
+// user cascades to all of its data. Returns how many were deleted.
+export async function deleteExpiredSandboxes() {
+  const { data, error } = await supabase
+    .from('demo_sandboxes')
+    .select('user_id')
+    .lte('created_at', new Date(Date.now() - SANDBOX_TTL_MS).toISOString())
+    .order('created_at')
+    .limit(CLEANUP_BATCH);
+  if (error) throw error;
+
+  for (const { user_id } of data) {
+    // A 404 means a concurrent cleanup got there first.
+    const { error: deleteError } = await supabase.auth.admin.deleteUser(user_id);
+    if (deleteError && deleteError.status !== 404) throw deleteError;
+  }
+  return data.length;
+}
+
+// The password is random and used once, right here, so it never leaves the
+// server. app_metadata can only be set with the service role, so the client
+// can trust the demo flag.
+async function createSandbox() {
+  const email = `demo-${randomUUID()}@finance-demo-app.dev`;
+  const password = randomBytes(24).toString('base64url');
+  const { data, error } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    app_metadata: { demo: true },
+  });
+  if (error) throw error;
+  const userId = data.user.id;
+
   try {
-    const { session, user } = await signInDemoUser();
-    await resetDemoData(user.id);
+    const { error: sandboxError } = await supabase.from('demo_sandboxes').insert({ user_id: userId });
+    if (sandboxError) throw sandboxError;
+    await seedDemoData(userId);
+
+    const { data: signIn, error: signInError } = await createSignInClient().auth.signInWithPassword({ email, password });
+    if (signInError) throw signInError;
+    return signIn.session;
+  } catch (err) {
+    // Don't leave a half-built account behind.
+    await supabase.auth.admin.deleteUser(userId);
+    throw err;
+  }
+}
+
+demoRouter.post('/session', demoLimiter, async (req, res) => {
+  // Runs alongside the request, so the visitor never waits on it.
+  deleteExpiredSandboxes().catch((err) => console.error('Sandbox cleanup failed:', err));
+
+  try {
+    const max = Number(process.env.DEMO_MAX_SANDBOXES ?? DEFAULT_MAX_SANDBOXES);
+    if ((await countLiveSandboxes()) >= max) {
+      return res.status(503).json({ error: 'The demo is busy right now. Please try again later.' });
+    }
+    const session = await createSandbox();
     res.json({ access_token: session.access_token, refresh_token: session.refresh_token });
   } catch (err) {
     console.error('Demo sign-in failed:', err);

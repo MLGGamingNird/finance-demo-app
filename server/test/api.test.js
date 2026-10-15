@@ -359,16 +359,69 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
     });
   });
 
-  describe('demo login', () => {
-    it('returns a working session with seeded data', async () => {
+  describe('demo sandboxes', () => {
+    const sandboxes = [];
+    let deleteExpiredSandboxes;
+    let SANDBOX_TTL_MS;
+
+    beforeAll(async () => {
+      ({ deleteExpiredSandboxes, SANDBOX_TTL_MS } = await import('../src/routes/demo.js'));
+    });
+
+    afterAll(async () => {
+      await Promise.all(sandboxes.map(deleteTestUser));
+    });
+
+    async function startDemo() {
       const res = await request(app).post('/api/demo/session');
       expect(res.status).toBe(200);
-      const demo = { token: res.body.access_token };
+      const { data, error } = await adminClient().auth.getUser(res.body.access_token);
+      expect(error).toBeNull();
+      const sandbox = { id: data.user.id, token: res.body.access_token, user: data.user };
+      sandboxes.push(sandbox);
+      return sandbox;
+    }
 
-      const txns = await as(demo).get('/api/transactions?limit=100');
+    it('gives each visitor their own seeded sandbox', async () => {
+      const [first, second] = await Promise.all([startDemo(), startDemo()]);
+      expect(first.id).not.toBe(second.id);
+      expect(first.user.app_metadata.demo).toBe(true);
+
+      const txns = await as(first).get('/api/transactions?limit=100');
       expect(txns.body.items.length).toBeGreaterThan(50);
-      const budgets = await as(demo).get('/api/budgets');
+      const budgets = await as(first).get('/api/budgets');
       expect(budgets.body.length).toBeGreaterThan(0);
+
+      const added = await as(first).post('/api/transactions', { description: 'Only mine', amount: -1, category_id: null });
+      expect(added.status).toBe(201);
+      const theirs = await as(second).get('/api/transactions?limit=100');
+      expect(theirs.body.items.some((t) => t.id === added.body.id)).toBe(false);
+    });
+
+    it('refuses new sandboxes once the cap is reached', async () => {
+      process.env.DEMO_MAX_SANDBOXES = '0';
+      try {
+        expect((await request(app).post('/api/demo/session')).status).toBe(503);
+      } finally {
+        delete process.env.DEMO_MAX_SANDBOXES;
+      }
+    });
+
+    it('deletes expired sandboxes along with their data', async () => {
+      const old = await startDemo();
+      const db = adminClient();
+      const expired = new Date(Date.now() - SANDBOX_TTL_MS - 60_000).toISOString();
+      const { error } = await db.from('demo_sandboxes').update({ created_at: expired }).eq('user_id', old.id);
+      expect(error).toBeNull();
+
+      // Other expired sandboxes may be ahead of it in line.
+      while ((await deleteExpiredSandboxes()) > 0);
+
+      const { data } = await db.auth.admin.getUserById(old.id);
+      expect(data.user).toBeNull();
+      const { count } = await db.from('transactions').select('id', { count: 'exact', head: true }).eq('user_id', old.id);
+      expect(count).toBe(0);
+      expect((await as(old).get('/api/transactions')).status).toBe(401);
     });
   });
 });
