@@ -5,6 +5,7 @@ import { requireAuth } from '../lib/requireAuth.js';
 import { PG_FOREIGN_KEY_VIOLATION, validateBody, validateIdParam } from '../lib/validate.js';
 import { monthRange, monthSchema } from '../lib/month.js';
 import { suggestCategory } from '../lib/categorize.js';
+import { afterCursorFilter, decodeCursor, encodeCursor } from '../lib/pagination.js';
 
 export const transactionsRouter = Router();
 
@@ -45,10 +46,14 @@ function sendDbError(res, error) {
   res.status(500).json({ error: error.message });
 }
 
-// Optional filters: ?month=YYYY-MM and ?category_id=<uuid>|none.
+// Optional filters: ?month=YYYY-MM and ?category_id=<uuid>|none. Results come
+// in pages of ?limit= rows; pass the returned next_cursor as ?cursor= for the
+// next page. next_cursor is null on the last page.
 const listQuerySchema = z.object({
   month: monthSchema.optional(),
   category_id: z.union([z.uuid('Invalid category'), z.literal('none')]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  cursor: z.string().max(500).optional(),
 });
 
 transactionsRouter.get('/', async (req, res) => {
@@ -56,7 +61,12 @@ transactionsRouter.get('/', async (req, res) => {
   if (!query.success) {
     return res.status(400).json({ error: 'Invalid query', fields: z.flattenError(query.error).fieldErrors });
   }
-  const { month, category_id } = query.data;
+  const { month, category_id, limit, cursor } = query.data;
+
+  const after = cursor === undefined ? null : decodeCursor(cursor);
+  if (cursor !== undefined && !after) {
+    return res.status(400).json({ error: 'Invalid query', fields: { cursor: ['Invalid cursor'] } });
+  }
 
   let request = supabase.from('transactions').select(COLUMNS).eq('user_id', req.user.id);
 
@@ -66,13 +76,18 @@ transactionsRouter.get('/', async (req, res) => {
   }
   if (category_id === 'none') request = request.is('category_id', null);
   else if (category_id) request = request.eq('category_id', category_id);
+  if (after) request = request.or(afterCursorFilter(after));
 
+  // One extra row tells us whether another page exists.
   const { data, error } = await request
     .order('occurred_at', { ascending: false })
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(limit + 1);
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  const items = data.slice(0, limit);
+  res.json({ items, next_cursor: data.length > limit ? encodeCursor(items.at(-1)) : null });
 });
 
 // Leaving category_id out asks the server to pick one; sending null means

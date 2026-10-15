@@ -166,6 +166,8 @@ function AuthForm() {
   );
 }
 
+const TRANSACTIONS_PAGE_SIZE = '15';
+
 // Runs `load` whenever deps change and ignores responses from stale runs,
 // so flipping quickly between months can't show the wrong month's data.
 function useApiData(load, deps, onError) {
@@ -209,15 +211,38 @@ function Dashboard({ session }) {
     [token, month, version],
     showLoadError,
   );
-  const transactions = useApiData(
+  // Each first page remembers its own query, so "Load more" continues that
+  // query even while a newly picked month or filter is still loading.
+  const firstPage = useApiData(
     () => {
-      const params = new URLSearchParams({ month });
+      const params = new URLSearchParams({ month, limit: TRANSACTIONS_PAGE_SIZE });
       if (categoryFilter) params.set('category_id', categoryFilter);
-      return apiFetch(`/api/transactions?${params}`, { token });
+      return apiFetch(`/api/transactions?${params}`, { token }).then((page) => ({ ...page, params }));
     },
     [token, month, categoryFilter, version],
     showLoadError,
   );
+  // Pages fetched with "Load more" belong to the first page they extend, so a
+  // new month, filter or edit (a new first page) discards them.
+  const [morePages, setMorePages] = useState({ after: null, items: [], nextCursor: null });
+  const [loadingMore, setLoadingMore] = useState(false);
+  const extra =
+    morePages.after === firstPage ? morePages : { after: firstPage, items: [], nextCursor: firstPage?.next_cursor };
+  const transactions = firstPage && [...firstPage.items, ...extra.items];
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams(firstPage.params);
+      params.set('cursor', extra.nextCursor);
+      const page = await apiFetch(`/api/transactions?${params}`, { token });
+      setMorePages({ after: firstPage, items: [...extra.items, ...page.items], nextCursor: page.next_cursor });
+    } catch {
+      setError('Failed to load more transactions');
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const loading = transactions === null || categories === null;
   const loadingSlow = useSlowNotice(loading);
@@ -332,6 +357,11 @@ function Dashboard({ session }) {
           onEdit={handleEdit}
           onDelete={handleDelete}
         />
+        {!loading && extra.nextCursor && (
+          <button type="button" className="secondary load-more" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        )}
       </section>
     </div>
   );

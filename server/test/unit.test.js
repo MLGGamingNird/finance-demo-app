@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { monthRange, monthSchema, shiftMonth } from '../src/lib/month.js';
 import { fromCents, toCents } from '../src/lib/money.js';
 import { rateLimit } from '../src/lib/rateLimit.js';
+import { afterCursorFilter, decodeCursor, encodeCursor } from '../src/lib/pagination.js';
 
 describe('month helpers', () => {
   it('returns a half-open range for a month', () => {
@@ -64,5 +65,32 @@ describe('rateLimit', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('pagination cursors', () => {
+  const row = {
+    occurred_at: '2026-10-03',
+    created_at: '2026-10-03T14:05:06.123456+00:00',
+    id: '0b6c3c1e-8f4a-4b7e-9a51-2d5f1c7e8a90',
+  };
+
+  it("round-trips a row's sort key", () => {
+    expect(decodeCursor(encodeCursor(row))).toEqual([row.occurred_at, row.created_at, row.id]);
+  });
+
+  it('rejects anything it did not produce', () => {
+    const forged = Buffer.from(JSON.stringify(['2026-10-03', '2026-10-03"),id.gt.(0', row.id])).toString('base64url');
+    for (const bad of ['', 'not-a-cursor', forged, Buffer.from('{"a":1}').toString('base64url')]) {
+      expect(decodeCursor(bad)).toBeNull();
+    }
+  });
+
+  it('builds a filter for rows after the cursor', () => {
+    expect(afterCursorFilter(decodeCursor(encodeCursor(row)))).toBe(
+      'occurred_at.lt.2026-10-03,' +
+        'and(occurred_at.eq.2026-10-03,created_at.lt."2026-10-03T14:05:06.123456+00:00"),' +
+        'and(occurred_at.eq.2026-10-03,created_at.eq."2026-10-03T14:05:06.123456+00:00",id.lt.0b6c3c1e-8f4a-4b7e-9a51-2d5f1c7e8a90)',
+    );
   });
 });

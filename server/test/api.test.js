@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { canRunIntegration, createTestUser, deleteTestUser, userClient } from './helpers.js';
+import { adminClient, canRunIntegration, createTestUser, deleteTestUser, userClient } from './helpers.js';
 
 // AI calls are covered by their fallback paths; tests never call Groq.
 delete process.env.GROQ_API_KEY;
@@ -115,13 +115,53 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
       await as(alice).post('/api/transactions', { description: 'Bus', amount: -3, category_id: transport, occurred_at: '2025-07-03' });
 
       const june = await as(alice).get('/api/transactions?month=2025-06');
-      expect(june.body.map((t) => t.description)).toEqual(['Train']);
+      expect(june.body.items.map((t) => t.description)).toEqual(['Train']);
 
       const byCategory = await as(alice).get(`/api/transactions?category_id=${transport}`);
-      expect(byCategory.body.map((t) => t.description).sort()).toEqual(['Bus', 'Train']);
+      expect(byCategory.body.items.map((t) => t.description).sort()).toEqual(['Bus', 'Train']);
 
       const bad = await as(alice).get('/api/transactions?month=2025-13');
       expect(bad.status).toBe(400);
+    });
+
+    it('pages through every row exactly once, newest first', async () => {
+      // One batch insert gives all rows the same created_at, so only the id
+      // keeps the order stable across pages.
+      const rows = ['2019-02-03', '2019-02-03', '2019-02-03', '2019-02-01', '2019-02-01'].map((occurred_at, i) => ({
+        user_id: alice.id,
+        description: `Paged ${i}`,
+        amount: -(i + 1),
+        occurred_at,
+      }));
+      const { error } = await adminClient().from('transactions').insert(rows);
+      expect(error).toBeNull();
+
+      const all = await as(alice).get('/api/transactions?month=2019-02&limit=100');
+      expect(all.body.items).toHaveLength(5);
+      expect(all.body.next_cursor).toBeNull();
+
+      const paged = [];
+      let cursor = null;
+      do {
+        const params = new URLSearchParams({ month: '2019-02', limit: '2' });
+        if (cursor) params.set('cursor', cursor);
+        const page = await as(alice).get(`/api/transactions?${params}`);
+        expect(page.status).toBe(200);
+        expect(page.body.items.length).toBeLessThanOrEqual(2);
+        paged.push(...page.body.items);
+        cursor = page.body.next_cursor;
+      } while (cursor);
+
+      expect(paged.map((t) => t.id)).toEqual(all.body.items.map((t) => t.id));
+      expect(paged.map((t) => t.occurred_at)).toEqual(['2019-02-03', '2019-02-03', '2019-02-03', '2019-02-01', '2019-02-01']);
+    });
+
+    it('rejects bad page sizes and cursors', async () => {
+      expect((await as(alice).get('/api/transactions?limit=0')).status).toBe(400);
+      expect((await as(alice).get('/api/transactions?limit=101')).status).toBe(400);
+      const bad = await as(alice).get('/api/transactions?cursor=not-a-cursor');
+      expect(bad.status).toBe(400);
+      expect(bad.body.fields.cursor).toEqual(['Invalid cursor']);
     });
 
     it('returns 404 for malformed ids instead of a database error', async () => {
@@ -160,7 +200,7 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
       const budgets = await as(alice).get('/api/budgets');
       expect(budgets.body.some((b) => b.category_id === pets)).toBe(false);
       const list = await as(alice).get('/api/transactions');
-      expect(list.body.find((t) => t.id === txn.body.id).category_id).toBeNull();
+      expect(list.body.items.find((t) => t.id === txn.body.id).category_id).toBeNull();
     });
   });
 
@@ -251,7 +291,7 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
     describe('through the API', () => {
       it("doesn't list Alice's transactions or categories", async () => {
         const txns = await as(bob).get('/api/transactions');
-        expect(txns.body.some((t) => t.id === aliceTxn.id)).toBe(false);
+        expect(txns.body.items.some((t) => t.id === aliceTxn.id)).toBe(false);
         const cats = await as(bob).get('/api/categories');
         expect(cats.body.some((c) => c.id === aliceCategory)).toBe(false);
       });
@@ -261,7 +301,7 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
         expect((await as(bob).delete(`/api/transactions/${aliceTxn.id}`)).status).toBe(404);
 
         const stillThere = await as(alice).get('/api/transactions?month=2021-05');
-        expect(stillThere.body).toContainEqual(expect.objectContaining({ id: aliceTxn.id, amount: -999 }));
+        expect(stillThere.body.items).toContainEqual(expect.objectContaining({ id: aliceTxn.id, amount: -999 }));
       });
 
       it("can't file his own transaction under Alice's category", async () => {
@@ -305,7 +345,7 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
         await db.from('transactions').delete().eq('id', aliceTxn.id);
 
         const check = await as(alice).get('/api/transactions?month=2021-05');
-        expect(check.body).toContainEqual(expect.objectContaining({ id: aliceTxn.id, amount: -999 }));
+        expect(check.body.items).toContainEqual(expect.objectContaining({ id: aliceTxn.id, amount: -999 }));
       });
 
       it('blocks the aggregation functions for logged-in users', async () => {
@@ -325,8 +365,8 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
       expect(res.status).toBe(200);
       const demo = { token: res.body.access_token };
 
-      const txns = await as(demo).get('/api/transactions');
-      expect(txns.body.length).toBeGreaterThan(50);
+      const txns = await as(demo).get('/api/transactions?limit=100');
+      expect(txns.body.items.length).toBeGreaterThan(50);
       const budgets = await as(demo).get('/api/budgets');
       expect(budgets.body.length).toBeGreaterThan(0);
     });

@@ -186,6 +186,11 @@ input[type='date'] {
   color: #64748b;
 }
 
+.load-more {
+  display: block;
+  margin: 0.75rem auto 0;
+}
+
 .transaction-list {
   list-style: none;
   margin: 0;

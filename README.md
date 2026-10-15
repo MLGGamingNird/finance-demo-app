@@ -10,7 +10,7 @@ A personal finance tracker with budgets, spending charts, and AI features: trans
 
 ## Features
 
-- **Transactions:** add, edit and delete income and expenses, with categories and dates; filter by month and category.
+- **Transactions:** add, edit and delete income and expenses, with categories and dates; filter by month and category; long months load in pages.
 - **Budgets:** monthly limits per category with progress bars that turn amber at 80% and red when over.
 - **Dashboard:** month picker, income/spending/net summary, spending by category, and a six-month income vs. spending trend. Every chart has a table view.
 - **AI auto-categorization:** leave the category on "Auto" and the server picks one, from your own history first, then from an LLM. Auto-picked categories are tagged so you can tell.
@@ -56,6 +56,8 @@ The browser talks to Supabase only for authentication. All data goes through the
 **Two independent layers of data isolation.** Every API query filters by the authenticated user, and Postgres enforces the same thing again with row-level security. Composite foreign keys, `(category_id, user_id) → categories(id, user_id)`, mean a transaction or budget can't even reference another user's category. The tests check each layer separately: one set goes through the API, and another queries Postgres directly with a second user's session.
 
 **Money math.** Amounts are Postgres `numeric`. Monthly totals are aggregated in SQL functions rather than by summing rows in Node, which keeps them exact and avoids Supabase's 1,000-row response limit. The functions are callable only by the server's service role. Any remaining arithmetic in JavaScript is done in integer cents, so `0.1 + 0.2` is exactly `0.3`.
+
+**Cursor pagination.** The transaction list loads 15 at a time. Each page carries a cursor holding the last row's sort key (date, created time, id), so a row added or deleted while you're paging can't cause duplicates or gaps the way an offset would. The id breaks ties between rows created in the same insert.
 
 **Dates, not timestamps.** A transaction happens on a day. Storing a `date` avoids the classic off-by-one-day bug when the browser and server are in different time zones.
 
@@ -120,7 +122,6 @@ supabase/migrations/      schema history, applied in order
 
 ## What I'd do next
 
-- **Paginate the transaction list.** It currently loads a whole month at once.
 - **Stream chat responses** token by token.
 - **Move the rate limiter to a shared store,** such as Redis or Postgres, if the API ever runs on more than one instance.
 - **Browser end-to-end tests** (Playwright) for the main flows.
