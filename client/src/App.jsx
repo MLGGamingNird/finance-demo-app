@@ -8,7 +8,10 @@ import { SummaryCards } from './components/SummaryCards';
 import { BudgetList } from './components/BudgetList';
 import { SpendingChat } from './components/SpendingChat';
 import { ImportCsv } from './components/ImportCsv';
+import { RecurringCharges } from './components/RecurringCharges';
+import { SavingsGoals } from './components/SavingsGoals';
 import { currentMonth } from './lib/month';
+import { todayISO } from './lib/format';
 
 // Recharts is the biggest dependency, so it loads after the dashboard renders.
 const Charts = lazy(() => import('./components/Charts'));
@@ -218,6 +221,16 @@ function Dashboard({ session }) {
     [token, month, version],
     showLoadError,
   );
+  const goals = useApiData(
+    () => apiFetch(`/api/goals?today=${todayISO()}`, { token }),
+    [token, version],
+    showLoadError,
+  );
+  const recurring = useApiData(
+    () => apiFetch(`/api/summary/recurring?today=${todayISO()}`, { token }),
+    [token, version],
+    showLoadError,
+  );
   // Each first page remembers its own query, so "Load more" continues that
   // query even while a newly picked month or filter is still loading.
   const firstPage = useApiData(
@@ -324,6 +337,10 @@ function Dashboard({ session }) {
         summary={summary}
         onSave={handleSaveBudgets}
       />
+
+      <SavingsGoals data={goals} token={token} onChange={refresh} />
+
+      <RecurringCharges recurring={recurring} categories={categories ?? []} />
 
       <SpendingChat token={token} />
 

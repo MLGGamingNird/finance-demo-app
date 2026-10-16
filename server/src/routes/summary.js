@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { requireAuth } from '../lib/requireAuth.js';
 import { monthRange, monthSchema, shiftMonth } from '../lib/month.js';
 import { fromCents, toCents } from '../lib/money.js';
-import { spendingByMonth } from '../lib/spending.js';
+import { recurringCandidates, spendingByMonth } from '../lib/spending.js';
+import { RECURRING_LOOKBACK_DAYS, detectRecurring } from '../lib/recurring.js';
 
 export const summaryRouter = Router();
 
@@ -78,6 +79,27 @@ summaryRouter.get('/trend', async (req, res) => {
         return { month, income: fromCents(incomeCents), expenses: fromCents(expenseCents) };
       }),
     );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// The client sends its own date, so "still active" and "next charge" follow
+// the visitor's calendar rather than the server's time zone.
+const recurringQuerySchema = z.object({ today: z.iso.date().optional() });
+
+// Charges that repeat on a schedule, with their combined monthly cost.
+summaryRouter.get('/recurring', async (req, res) => {
+  const query = recurringQuerySchema.safeParse(req.query);
+  if (!query.success) return invalidQuery(res, query.error);
+
+  const today = query.data.today ?? new Date().toISOString().slice(0, 10);
+  const since = new Date(Date.parse(today) - RECURRING_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  try {
+    const items = detectRecurring(await recurringCandidates(req.user.id, since), today);
+    const monthlyCents = items.reduce((sum, item) => sum + toCents(item.monthly_amount), 0);
+    res.json({ items, monthly_total: fromCents(monthlyCents) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

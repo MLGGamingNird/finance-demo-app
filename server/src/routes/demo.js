@@ -75,6 +75,12 @@ const SEED_BUDGETS = [
   ['Subscriptions', 25],
 ];
 
+// [name, target, saved so far, months from now to the target date or null]
+const SEED_GOALS = [
+  ['Emergency fund', 15000, 6200, null],
+  ['Trip to Japan', 4500, 900, 9],
+];
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function toISODate(date) {
@@ -137,6 +143,18 @@ async function seedDemoData(userId) {
     SEED_BUDGETS.map(([category, amount]) => ({ user_id: userId, category_id: categoryIds.get(category), amount })),
   );
   if (budgetsError) throw budgetsError;
+
+  const today = new Date();
+  const { error: goalsError } = await supabase.from('savings_goals').insert(
+    SEED_GOALS.map(([name, target_amount, saved_amount, months]) => ({
+      user_id: userId,
+      name,
+      target_amount,
+      saved_amount,
+      target_date: months === null ? null : toISODate(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + months, 1))),
+    })),
+  );
+  if (goalsError) throw goalsError;
 }
 
 async function countLiveSandboxes() {

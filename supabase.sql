@@ -147,3 +147,59 @@ $$;
 
 revoke execute on function existing_import_hashes(uuid, text[]) from public, anon, authenticated;
 grant execute on function existing_import_hashes(uuid, text[]) to service_role;
+
+-- Expenses grouped by merchant, for spotting recurring charges. The merchant
+-- key is the description lowercased with digits and punctuation dropped, so
+-- store numbers and reference codes ("#552", "877-8244858") don't split one
+-- merchant into several.
+-- The server decides what counts as recurring; this only gathers the series.
+create function recurring_candidates(p_user_id uuid, p_since date)
+returns table (merchant text, description text, category_id uuid, dates date[], amounts numeric[])
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select
+    k.merchant,
+    (array_agg(t.description order by t.occurred_at desc, t.created_at desc))[1],
+    (array_agg(t.category_id order by t.occurred_at desc, t.created_at desc))[1],
+    array_agg(t.occurred_at order by t.occurred_at),
+    array_agg(-t.amount order by t.occurred_at)
+  from public.transactions t
+  cross join lateral (
+    select btrim(regexp_replace(lower(t.description), '[^a-z]+', ' ', 'g')) as merchant
+  ) k
+  where t.user_id = p_user_id
+    and t.amount < 0
+    and t.occurred_at >= p_since
+    and k.merchant <> ''
+  group by k.merchant
+  having count(*) >= 3
+$$;
+
+revoke execute on function recurring_candidates(uuid, date) from public, anon, authenticated;
+grant execute on function recurring_candidates(uuid, date) to service_role;
+
+-- Savings goals: something to save toward, how much is put aside so far,
+-- and an optional date to reach it by.
+
+create table savings_goals (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 60),
+  target_amount numeric(12, 2) not null check (target_amount > 0),
+  saved_amount numeric(12, 2) not null default 0 check (saved_amount >= 0),
+  target_date date,
+  created_at timestamptz not null default now()
+);
+
+create index savings_goals_user_idx on savings_goals (user_id, created_at);
+
+alter table savings_goals enable row level security;
+
+create policy "Users can manage their own savings goals"
+  on savings_goals
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);

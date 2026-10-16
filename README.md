@@ -13,6 +13,8 @@ A personal finance tracker with budgets, spending charts, and AI features: trans
 - **Transactions:** add, edit and delete income and expenses, with categories and dates; filter by month and category; long months load in pages.
 - **CSV import:** upload a bank export, check the columns and a preview, and import. Rows you've imported before are skipped, and new ones are categorized automatically. There's a sample export to try it with.
 - **Budgets:** monthly limits per category with progress bars that turn amber at 80% and red when over.
+- **Recurring charges:** bills and subscriptions found from your own history, with their monthly total, when each is next due, and why it was flagged.
+- **Savings goals:** progress toward each goal and, based on what you actually saved in recent months, when you'd reach it or what it would take to make a target date.
 - **Dashboard:** month picker, income/spending/net summary, spending by category, and a six-month income vs. spending trend. Every chart has a table view.
 - **AI auto-categorization:** leave the category on "Auto" and the server picks one, from your own history first, then from an LLM. Auto-picked categories are tagged so you can tell.
 - **Spending assistant:** ask things like "Am I on track with my budgets?" and get answers grounded in your actual numbers.
@@ -62,6 +64,10 @@ The browser talks to Supabase only for authentication. All data goes through the
 
 **CSV import that's safe to repeat.** Every bank formats its export differently, so the server finds the date, description and amount columns from common header names (or separate money-in and money-out columns), and the preview lets you pick them when it guesses wrong. Amounts are parsed straight to integer cents, including `$1,234.56`, `(12.00)` and trailing minus signs. Ambiguous dates like 03/04 are read month-first unless another row in the file only makes sense day-first. Each imported row stores a hash of its date, amount and description, plus a counter so two identical coffees on the same day stay separate, and a unique constraint on `(user_id, import_hash)` makes a repeated or overlapping import skip what's already there, even if two imports race. Rows the server can't read are listed instead of failing the whole file. Categorization reads your history in one query and sends only the remaining unique descriptions to the model, 40 at a time.
 
+**Recurring charges without an LLM.** Postgres groups expenses by merchant, after dropping digits and punctuation so store numbers don't split one merchant, and the server checks each series for a weekly, two-week or monthly rhythm with steady amounts that hasn't stopped. Plain rules are cheap, explainable and testable, and each result says why it was flagged ("6 charges since May, same amount each time"), so rent showing up next to Netflix reads as correct rather than as a bug. The demo's six seeded bills are all found, and nothing else is.
+
+**Goal dates from real behaviour.** A goal's projected date uses the average monthly net (income minus spending) of the last three complete months; the current month is left out because a half-finished month always looks like great saving or none at all. The page says so plainly, including the assumption that the whole pace goes to that goal.
+
 **Dates, not timestamps.** A transaction happens on a day. Storing a `date` avoids the classic off-by-one-day bug when the browser and server are in different time zones.
 
 **AI that fails safe.**
@@ -82,8 +88,8 @@ The browser talks to Supabase only for authentication. All data goes through the
 cd server && npm test
 ```
 
-- **Unit tests:** month and money helpers, the rate limiter, pagination cursors, and the CSV parser and bank-file reader.
-- **Integration tests (Supertest):** run the whole API against a real Postgres, Auth and PostgREST stack. They cover authentication, validation errors, CRUD, budgets, exact totals, auto-categorization fallbacks, CSV imports (preview, repeat imports, per-user duplicates, large files), demo sandboxes (separate, capped, expired ones deleted), and the isolation suite: a second user can't read, edit, delete, reference, budget or aggregate the first user's data, through the API or directly in Postgres.
+- **Unit tests:** month and money helpers, the rate limiter, pagination cursors, the CSV parser and bank-file reader, recurring-charge detection and goal projections.
+- **Integration tests (Supertest):** run the whole API against a real Postgres, Auth and PostgREST stack. They cover authentication, validation errors, CRUD, budgets, exact totals, auto-categorization fallbacks, CSV imports (preview, repeat imports, per-user duplicates, large files), savings goals, recurring charges on the demo data, demo sandboxes (separate, capped, expired ones deleted), and the isolation suite: a second user can't read, edit, delete, reference, budget or aggregate the first user's data, or see their savings goals, through the API or directly in Postgres.
 - **CI:** [GitHub Actions](.github/workflows/ci.yml) lints and builds the client, then starts a throwaway local Supabase from `supabase/migrations/` and runs the server tests against it, so CI needs no secrets and never touches the real database. The integration tests refuse to run against a remote database unless `ALLOW_REMOTE_TESTS=1` is set.
 
 ## Running locally
@@ -117,8 +123,8 @@ client/src/
   lib/                    API client, formatting, month helpers
 server/src/
   app.js                  Express app (index.js starts it)
-  routes/                 transactions, imports, categories, budgets, summary, chat, demo
-  lib/                    auth, validation, Groq client, categorizer, chat context, rate limiter, CSV import
+  routes/                 transactions, imports, categories, budgets, goals, summary, chat, demo
+  lib/                    auth, validation, Groq client, categorizer, chat context, rate limiter, CSV import, recurring charges, goals
 server/test/              unit and integration tests
 supabase/migrations/      schema history, applied in order
 ```

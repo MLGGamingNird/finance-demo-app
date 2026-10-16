@@ -7,6 +7,7 @@ import { budgetsRouter } from './routes/budgets.js';
 import { summaryRouter } from './routes/summary.js';
 import { chatRouter } from './routes/chat.js';
 import { importsRouter } from './routes/imports.js';
+import { goalsRouter } from './routes/goals.js';
 
 // The Express app without listen(), so tests can drive it with Supertest.
 export const app = express();
@@ -23,6 +24,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/transactions', transactionsRouter);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/budgets', budgetsRouter);
+app.use('/api/goals', goalsRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/demo', demoRouter);

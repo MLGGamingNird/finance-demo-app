@@ -204,6 +204,49 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
     });
   });
 
+  describe('savings goals', () => {
+    it('creates, projects, updates and deletes a goal', async () => {
+      const created = await as(alice).post('/api/goals', { name: '  New bike ', target_amount: 800 });
+      expect(created.status).toBe(201);
+      expect(created.body).toMatchObject({ name: 'New bike', target_amount: 800, saved_amount: 0, target_date: null });
+
+      const updated = await as(alice).patch(`/api/goals/${created.body.id}`, { saved_amount: 200, target_date: '2030-01-15' });
+      expect(updated.body).toMatchObject({ saved_amount: 200, target_date: '2030-01-15' });
+
+      const list = await as(alice).get('/api/goals?today=2029-10-01');
+      expect(list.status).toBe(200);
+      expect(list.body).toHaveProperty('monthly_pace');
+      expect(list.body.goals.find((g) => g.id === created.body.id)).toMatchObject({
+        remaining: 600,
+        reached: false,
+        needed_per_month: 200,
+      });
+
+      expect((await as(alice).delete(`/api/goals/${created.body.id}`)).status).toBe(204);
+      expect((await as(alice).delete(`/api/goals/${created.body.id}`)).status).toBe(404);
+    });
+
+    it('validates goals', async () => {
+      expect((await as(alice).post('/api/goals', { name: '', target_amount: 10 })).status).toBe(400);
+      expect((await as(alice).post('/api/goals', { name: 'X', target_amount: 0 })).status).toBe(400);
+      expect((await as(alice).post('/api/goals', { name: 'X', target_amount: 10, saved_amount: -1 })).status).toBe(400);
+      expect((await as(alice).post('/api/goals', { name: 'X', target_amount: 10.001 })).status).toBe(400);
+      expect((await as(alice).patch('/api/goals/not-an-id', { name: 'Y' })).status).toBe(404);
+    });
+
+    it("keeps each user's goals private, through the API and in Postgres", async () => {
+      const goal = await as(alice).post('/api/goals', { name: 'Private', target_amount: 50 });
+      expect((await as(bob).get('/api/goals')).body.goals.some((g) => g.id === goal.body.id)).toBe(false);
+      expect((await as(bob).patch(`/api/goals/${goal.body.id}`, { saved_amount: 50 })).status).toBe(404);
+      expect((await as(bob).delete(`/api/goals/${goal.body.id}`)).status).toBe(404);
+
+      if (process.env.SUPABASE_ANON_KEY) {
+        const { data } = await userClient(bob.token).from('savings_goals').select('id').eq('id', goal.body.id);
+        expect(data).toEqual([]);
+      }
+    });
+  });
+
   describe('summary', () => {
     it('totals a month exactly, in Postgres', async () => {
       const food = await categoryId(alice, 'Food & Drink');
@@ -421,6 +464,13 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
           p_end: '2022-01-01',
         });
         expect(error).not.toBeNull();
+
+        const bobDb = userClient(bob.token);
+        const calls = [
+          bobDb.rpc('recurring_candidates', { p_user_id: alice.id, p_since: '2000-01-01' }),
+          bobDb.rpc('existing_import_hashes', { p_user_id: alice.id, p_hashes: ['x'] }),
+        ];
+        for (const { error: callError } of await Promise.all(calls)) expect(callError).not.toBeNull();
       });
     });
   });
@@ -462,6 +512,26 @@ describe.skipIf(!canRunIntegration)('API (integration)', () => {
       expect(added.status).toBe(201);
       const theirs = await as(second).get('/api/transactions?limit=100');
       expect(theirs.body.items.some((t) => t.id === added.body.id)).toBe(false);
+    });
+
+    it('finds every recurring bill in the demo data, and nothing else', async () => {
+      const [sandbox] = sandboxes;
+      const today = new Date().toISOString().slice(0, 10);
+      const res = await as(sandbox).get(`/api/summary/recurring?today=${today}`);
+      expect(res.status).toBe(200);
+      expect(res.body.items.map((r) => r.description).sort()).toEqual(
+        ['Electric bill', 'Gym membership', 'Netflix', 'Phone bill', 'Rent', 'Spotify'],
+      );
+      expect(res.body.items.every((r) => r.cadence === 'monthly' && r.same_amount)).toBe(true);
+      expect(res.body.monthly_total).toBe(1639.78);
+
+      expect((await as(sandbox).get('/api/summary/recurring?today=soon')).status).toBe(400);
+
+      // The demo also starts with savings goals that have a projection.
+      const goals = await as(sandbox).get(`/api/goals?today=${today}`);
+      expect(goals.body.goals.map((g) => g.name)).toEqual(['Emergency fund', 'Trip to Japan']);
+      expect(goals.body.monthly_pace).toBeGreaterThan(0);
+      expect(goals.body.goals.every((g) => g.projected_month !== null)).toBe(true);
     });
 
     it('refuses new sandboxes once the cap is reached', async () => {

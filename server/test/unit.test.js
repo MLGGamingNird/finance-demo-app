@@ -4,6 +4,8 @@ import { fromCents, toCents } from '../src/lib/money.js';
 import { rateLimit } from '../src/lib/rateLimit.js';
 import { afterCursorFilter, decodeCursor, encodeCursor } from '../src/lib/pagination.js';
 import { parseCsv } from '../src/lib/csv.js';
+import { detectRecurring } from '../src/lib/recurring.js';
+import { projectGoal, savingsPace } from '../src/lib/goals.js';
 import { ImportError, detectColumns, detectDayFirst, parseAmountCents, parseDate, readBankCsv } from '../src/lib/bankImport.js';
 
 describe('month helpers', () => {
@@ -181,5 +183,102 @@ describe('bank CSV import', () => {
     }
     const chosen = readBankCsv(csv, { columns: { date: 0, description: 1, amount: 2, debit: -1, credit: -1 } });
     expect(chosen.rows).toHaveLength(1);
+  });
+});
+
+describe('detectRecurring', () => {
+  const series = (merchant, dates, amounts) => ({
+    merchant,
+    description: merchant,
+    category_id: null,
+    dates,
+    amounts: Array.isArray(amounts) ? amounts : dates.map(() => amounts),
+  });
+  const monthly = (day, months = ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10']) =>
+    months.map((m) => `${m}-${String(day).padStart(2, '0')}`);
+
+  it('flags a steady monthly charge and says when the next one is due', () => {
+    const [netflix] = detectRecurring([series('netflix', monthly(7), 15.49)], '2026-10-15');
+    expect(netflix).toMatchObject({
+      cadence: 'monthly',
+      amount: 15.49,
+      monthly_amount: 15.49,
+      next_date: '2026-11-07',
+      charge_count: 5,
+      same_amount: true,
+    });
+  });
+
+  it('allows bills that vary a little, but not a shop visited now and then', () => {
+    const found = detectRecurring(
+      [
+        series('electric', monthly(12), [72.3, 80.1, 95.4, 70, 68.25]),
+        series('trader joe s', ['2026-05-10', '2026-06-01', '2026-06-27', '2026-07-12', '2026-08-30', '2026-09-20'], 80),
+      ],
+      '2026-10-15',
+    );
+    expect(found.map((r) => [r.merchant, r.same_amount])).toEqual([['electric', false]]);
+  });
+
+  it('skips charges with amounts all over the place', () => {
+    expect(detectRecurring([series('amazon', monthly(3), [10, 80, 15, 120, 40])], '2026-10-15')).toEqual([]);
+  });
+
+  it('drops charges that have stopped', () => {
+    const stopped = series('gym', monthly(5, ['2026-03', '2026-04', '2026-05', '2026-06']), 35);
+    expect(detectRecurring([stopped], '2026-10-15')).toEqual([]);
+  });
+
+  it('handles weekly charges and converts them to a monthly cost', () => {
+    const [box] = detectRecurring(
+      [series('meal box', ['2026-09-17', '2026-09-24', '2026-10-01', '2026-10-08', '2026-10-15'], 60)],
+      '2026-10-15',
+    );
+    expect(box).toMatchObject({ cadence: 'weekly', next_date: '2026-10-22', monthly_amount: 260 });
+  });
+
+  it('clamps the next monthly date to the end of a short month', () => {
+    const [rent] = detectRecurring([series('rent', ['2025-11-30', '2025-12-31', '2026-01-31'], 1450)], '2026-02-10');
+    expect(rent.next_date).toBe('2026-02-28');
+  });
+});
+
+describe('savings goals', () => {
+  it('averages net savings over months with activity', () => {
+    expect(savingsPace([])).toBeNull();
+    expect(
+      savingsPace([
+        { incomeCents: 500000, expenseCents: 300000 },
+        { incomeCents: 500000, expenseCents: 450000 },
+      ]),
+    ).toBe(125000);
+  });
+
+  it('projects when the recent pace reaches the goal', () => {
+    const goal = { target_amount: 1000, saved_amount: 250.5, target_date: null };
+    expect(projectGoal(goal, 30000, '2026-10')).toMatchObject({
+      remaining: 749.5,
+      reached: false,
+      projected_month: '2027-01',
+      needed_per_month: null,
+      on_track: null,
+    });
+  });
+
+  it('works out what a target date needs and whether the pace makes it', () => {
+    const goal = { target_amount: 4500, saved_amount: 900, target_date: '2027-07-01' };
+    expect(projectGoal(goal, 50000, '2026-10')).toMatchObject({ needed_per_month: 400, on_track: true, projected_month: '2027-06' });
+    expect(projectGoal(goal, 30000, '2026-10')).toMatchObject({ on_track: false, projected_month: '2027-10' });
+    // Spending more than earning: no projection, and not on track.
+    expect(projectGoal(goal, -5000, '2026-10')).toMatchObject({ projected_month: null, on_track: false });
+    // A past target date leaves one month.
+    expect(projectGoal(goal, 50000, '2027-09').needed_per_month).toBe(3600);
+  });
+
+  it('marks a goal reached once the saved amount covers it', () => {
+    expect(projectGoal({ target_amount: 100, saved_amount: 120, target_date: null }, null, '2026-10')).toMatchObject({
+      remaining: 0,
+      reached: true,
+    });
   });
 });

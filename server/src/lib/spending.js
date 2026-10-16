@@ -22,3 +22,10 @@ export async function topMerchants(userId, start, end, limit = 8) {
   if (error) throw error;
   return data;
 }
+
+// Expense series grouped by merchant since `since`, for recurring detection.
+export async function recurringCandidates(userId, since) {
+  const { data, error } = await supabase.rpc('recurring_candidates', { p_user_id: userId, p_since: since });
+  if (error) throw error;
+  return data;
+}

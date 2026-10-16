@@ -804,3 +804,45 @@ button.chip:hover:not(:disabled) {
     flex: 1;
   }
 }
+
+.recurring-total {
+  color: #f87171;
+  font-variant-numeric: tabular-nums;
+}
+
+.recurring-list .why {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.goal-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.goal-projection {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.goal-projection.behind {
+  color: #fbbf24;
+}
+
+.goal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.goal-add {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.goal-add input {
+  width: 7rem;
+}
